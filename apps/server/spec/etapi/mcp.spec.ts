@@ -169,6 +169,7 @@ describe("mcp", () => {
             expect(toolNames).toContain("get_note_content");
             expect(toolNames).toContain("create_note");
             expect(toolNames).toContain("get_spreadsheet_info");
+            expect(toolNames).toContain("get_spreadsheet_range");
             expect(toolNames).not.toContain("get_current_note");
         });
     });
@@ -262,6 +263,56 @@ describe("mcp", () => {
             });
             expect(result.blobId).toBeTruthy();
             expect(JSON.stringify(result)).not.toMatch(/cellData|private B3 value/);
+        });
+
+        it("reads only the requested spreadsheet range through authenticated MCP", async () => {
+            const workbook = {
+                version: 1,
+                workbook: {
+                    sheetOrder: ["prices"],
+                    sheets: {
+                        prices: {
+                            id: "prices", name: "Prices",
+                            cellData: {
+                                1: { 0: { v: "Product" }, 1: { v: "Price" } },
+                                2: { 0: { v: "Laptop" }, 1: { v: 1200, t: 2 } },
+                                9: { 9: { v: "outside the range" } }
+                            }
+                        }
+                    }
+                }
+            };
+            const created = await supertest(app)
+                .post("/etapi/create-note")
+                .auth(USER, token, { type: "basic" })
+                .send({
+                    parentNoteId: "root", title: "MCP range", type: "spreadsheet",
+                    mime: "application/json", content: JSON.stringify(workbook)
+                })
+                .expect(201);
+            const spreadsheetId = created.body.note.noteId as string;
+            async function readRange(range: string) {
+                const response = await mcpPost(app)
+                    .send(jsonRpc("tools/call", {
+                        name: "get_spreadsheet_range",
+                        arguments: { noteId: spreadsheetId, sheet: "Prices", range }
+                    }))
+                    .expect(200);
+                return parseSseResponse(response.text).result;
+            }
+
+            const read = await readRange("A2:B3");
+            const result = JSON.parse(read.content[0].text);
+            expect(read.isError).toBeUndefined();
+            expect(result).toEqual({
+                noteId: spreadsheetId, sheetId: "prices", sheetName: "Prices", range: "A2:B3",
+                cells: [[{ v: "Product" }, { v: "Price" }], [{ v: "Laptop" }, { v: 1200, t: 2 }]]
+            });
+            expect(JSON.stringify(result)).not.toContain("outside the range");
+
+            const tooLarge = await readRange("A1:Z1000");
+            expect(tooLarge.isError).toBe(true);
+            expect(JSON.parse(tooLarge.content[0].text).error).toContain("26000 cells");
         });
 
         it("records the links in the content it writes", async () => {
