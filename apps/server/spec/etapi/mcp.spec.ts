@@ -168,6 +168,7 @@ describe("mcp", () => {
             expect(toolNames).toContain("get_note");
             expect(toolNames).toContain("get_note_content");
             expect(toolNames).toContain("create_note");
+            expect(toolNames).toContain("get_spreadsheet_info");
             expect(toolNames).not.toContain("get_current_note");
         });
     });
@@ -224,6 +225,43 @@ describe("mcp", () => {
             const parsed = JSON.parse(body.result.content[0].text);
             expect(parsed.noteId).toBe(noteId);
             expect(parsed.content).toContain("MCP test note content");
+        });
+
+        it("reads spreadsheet metadata through authenticated MCP without exposing cells", async () => {
+            const workbook = {
+                version: 1,
+                workbook: {
+                    sheetOrder: ["budget"],
+                    sheets: {
+                        budget: {
+                            id: "budget", name: "Budget", rowCount: 100, columnCount: 26,
+                            cellData: { 2: { 1: { v: "private B3 value" } } }
+                        }
+                    }
+                }
+            };
+            const created = await supertest(app)
+                .post("/etapi/create-note")
+                .auth(USER, token, { type: "basic" })
+                .send({
+                    parentNoteId: "root", title: "MCP spreadsheet", type: "spreadsheet",
+                    mime: "application/json", content: JSON.stringify(workbook)
+                })
+                .expect(201);
+            const spreadsheetId = created.body.note.noteId as string;
+            const response = await mcpPost(app)
+                .send(jsonRpc("tools/call", {
+                    name: "get_spreadsheet_info", arguments: { noteId: spreadsheetId }
+                }))
+                .expect(200);
+            const result = JSON.parse(parseSseResponse(response.text).result.content[0].text);
+
+            expect(result).toMatchObject({
+                noteId: spreadsheetId, title: "MCP spreadsheet",
+                sheets: [{ id: "budget", name: "Budget", rowCount: 100, columnCount: 26, hidden: false }]
+            });
+            expect(result.blobId).toBeTruthy();
+            expect(JSON.stringify(result)).not.toMatch(/cellData|private B3 value/);
         });
 
         it("records the links in the content it writes", async () => {
