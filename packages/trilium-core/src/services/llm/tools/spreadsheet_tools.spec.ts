@@ -135,7 +135,7 @@ describe("get_spreadsheet_range", () => {
             cells: [[{ v: 1200, t: 2 }]]
         });
         expect(result).not.toBeInstanceOf(Promise);
-        expect(getRangeTool().mutates).not.toBe(true);
+        expect(getSpreadsheetTool("get_spreadsheet_range").mutates).not.toBe(true);
     });
 
     it("returns only the requested rectangle, with empty cells as null", () => {
@@ -231,15 +231,162 @@ describe("get_spreadsheet_range", () => {
     });
 });
 
-function readCells(args: { noteId: string; sheet: string; range: string }) {
-    return getRangeTool().execute(args);
+describe("set_spreadsheet_range", () => {
+    beforeEach(() => becca.reset());
+
+    it("writes only the range, keeps styles, and reads back with the new blobId", () => {
+        const note = buildWritableSheet({ id: "book" });
+        const result = writeCells({
+            noteId: "book", sheet: "Products", range: "a3:b4",
+            values: [["Tablet", 300], ["Pen", 2]], expectedBlobId: "blob-0"
+        });
+
+        expect(result).toEqual({
+            noteId: "book", sheetId: "products", sheetName: "Products", range: "A3:B4",
+            blobId: "blob-1"
+        });
+        expect(result).not.toBeInstanceOf(Promise);
+        expect(getSpreadsheetTool("set_spreadsheet_range").mutates).toBe(true);
+        expect(note.saveRevision).toHaveBeenCalledTimes(1);
+        expect(readCells({ noteId: "book", sheet: "Products", range: "A2:C6" })).toMatchObject({
+            cells: [
+                [{ v: "Product", t: 1 }, { v: "Price", t: 1 }, null],
+                [{ v: "Tablet", t: 1 }, { v: 300, t: 2 }, null],
+                [{ v: "Pen", t: 1 }, { v: 2, t: 2 }, null],
+                [{ v: "Keyboard", t: 1 }, { v: 100, t: 2 }, null],
+                [{ v: "Total", t: 1 }, { v: 1300, f: "=SUM(B3:B5)", t: 2 }, { v: true, t: 3 }]
+            ]
+        });
+        expect(readCells({ noteId: "book", sheet: "notes", range: "B3" }))
+            .toMatchObject({ cells: [[{ v: "other sheet" }]] });
+
+        const stored = JSON.parse(String(note.getContent()));
+        const original = JSON.parse(rangeContent);
+        expect(stored.workbook.sheets.products.cellData[3][1])
+            .toEqual({ v: 2, t: 2, s: "highlight" });
+        expect(stored.workbook.sheets.notes).toEqual(original.workbook.sheets.notes);
+        expect(stored.workbook.styles).toEqual(original.workbook.styles);
+        expect(stored.workbook.sheetOrder).toEqual(original.workbook.sheetOrder);
+    });
+
+    it("clears cells with null and replaces formulas, chaining writes through blobId", () => {
+        const note = buildWritableSheet({ id: "book" });
+        const first = writeCells({
+            noteId: "book", sheet: "Products", range: "B6:C6",
+            values: [[1500, null]], expectedBlobId: "blob-0"
+        }) as { blobId: string };
+        const second = writeCells({
+            noteId: "book", sheet: "Products", range: "A1",
+            values: [[null]], expectedBlobId: first.blobId
+        });
+
+        expect(second).toMatchObject({ range: "A1", blobId: "blob-2" });
+        const read = readCells({ noteId: "book", sheet: "Products", range: "A1:C6" }) as {
+            cells: unknown[][];
+        };
+        expect(read.cells[0]).toEqual([null, null, null]);
+        expect(read.cells[5]).toEqual([{ v: "Total", t: 1 }, { v: 1500, t: 2 }, null]);
+        const cells = JSON.parse(String(note.getContent())).workbook.sheets.products.cellData;
+        expect(cells[0][0]).toEqual({ s: "title" });
+        expect(cells[5][1]).toEqual({ v: 1500, t: 2 });
+    });
+
+    it("refuses a stale expectedBlobId before reading the note", () => {
+        const note = buildWritableSheet({ id: "book" });
+        const readContent = vi.spyOn(note, "getContent");
+
+        expect(writeCells({
+            noteId: "book", sheet: "Products", range: "B3",
+            values: [[1]], expectedBlobId: "blob-from-an-earlier-read"
+        })).toEqual({ error: expect.stringMatching(/^Stale expectedBlobId/) });
+        expect(readContent).not.toHaveBeenCalled();
+        expect(note.setContent).not.toHaveBeenCalled();
+        expect(note.saveRevision).not.toHaveBeenCalled();
+    });
+
+    it("rejects bad ranges, values and sheets without changing the note", () => {
+        const note = buildWritableSheet({ id: "book" });
+        const write = ({ sheet = "Products", range, values }: {
+            sheet?: string; range: string; values: unknown[][];
+        }) => writeCells({ noteId: "book", sheet, range, values, expectedBlobId: "blob-0" });
+
+        for (const range of ["", "A0", "A:A", "R1C1"]) {
+            expect(write({ range, values: [[1]] }))
+                .toEqual({ error: expect.stringContaining("Invalid range") });
+        }
+        expect(write({ range: "A1:Z1000", values: [] }))
+            .toEqual({ error: expect.stringMatching(/26000 cells; the limit is 10000/) });
+        expect(write({ range: "A1:B2", values: [[1, 2]] })).toEqual({
+            error: 'Range "A1:B2" is 2 rows by 2 columns, but values has 1 row.'
+        });
+        expect(write({ range: "B3", values: [["=B4*2"]] }))
+            .toEqual({ error: expect.stringContaining("writing formulas is not supported") });
+        expect(write({ range: "B1001", values: [[1]] }))
+            .toEqual({ error: expect.stringContaining("which has 1000 rows and 20 columns") });
+        expect(write({ sheet: "Missing", range: "B3", values: [[1]] }))
+            .toEqual({ error: "Spreadsheet sheet not found" });
+        expect(note.getContent()).toBe(rangeContent);
+        expect(note.setContent).not.toHaveBeenCalled();
+        expect(note.saveRevision).not.toHaveBeenCalled();
+    });
+
+    it("rejects other note types, excluded, locked and binary notes", () => {
+        const notes = [
+            buildWritableSheet({ id: "text", type: "text" }),
+            buildWritableSheet({ id: "excluded", "#excludeFromLlm": "true" }),
+            buildWritableSheet({ id: "locked" })
+        ];
+        notes[2].isContentAvailable = () => false;
+        const binary = buildWritableSheet({ id: "binary" });
+        binary.getContent = () => new Uint8Array([1, 2, 3]);
+        const args = { sheet: "Products", range: "B3", values: [[1]], expectedBlobId: "blob-0" };
+
+        expect(writeCells({ ...args, noteId: "text" }))
+            .toEqual({ error: "Note is not a spreadsheet" });
+        expect(writeCells({ ...args, noteId: "excluded" })).toEqual({ error: "Note not found" });
+        expect(writeCells({ ...args, noteId: "missing" })).toEqual({ error: "Note not found" });
+        expect(writeCells({ ...args, noteId: "locked" }))
+            .toEqual({ error: "Note is protected and cannot be modified" });
+        expect(writeCells({ ...args, noteId: "binary" }))
+            .toEqual({ error: "Spreadsheet content must be JSON text" });
+        for (const note of [...notes, binary]) {
+            expect(note.setContent).not.toHaveBeenCalled();
+        }
+    });
+});
+
+/**
+ * A spreadsheet note holding `rangeContent` in memory: `setContent` stores the new content and
+ * moves `blobId` from "blob-0" to "blob-1" and on, as a real save does. `saveRevision` is a stub.
+ */
+function buildWritableSheet(definition: Parameters<typeof buildNote>[0]) {
+    const note = buildNote({ type: "spreadsheet", content: rangeContent, ...definition });
+    let content = note.getContent();
+    let saves = 0;
+    note.blobId = "blob-0";
+    note.getContent = () => content;
+    note.setContent = vi.fn((next: string | Uint8Array) => {
+        content = next;
+        note.blobId = `blob-${++saves}`;
+    }) as typeof note.setContent;
+    note.saveRevision = vi.fn() as typeof note.saveRevision;
+    return note;
 }
 
-function getRangeTool() {
-    const rangeTool = Array.from(spreadsheetTools)
-        .find(([name]) => name === "get_spreadsheet_range")?.[1];
-    if (!rangeTool) {
-        throw new Error("Spreadsheet range tool is not registered");
+function readCells(args: { noteId: string; sheet: string; range: string }) {
+    return getSpreadsheetTool("get_spreadsheet_range").execute(args);
+}
+
+function writeCells(args: {
+    noteId: string; sheet: string; range: string; values: unknown[][]; expectedBlobId: string;
+}) {
+    return getSpreadsheetTool("set_spreadsheet_range").execute(args);
+}
+
+function getSpreadsheetTool(toolName: string) {
+    const found = Array.from(spreadsheetTools).find(([name]) => name === toolName)?.[1];
+    if (!found) {
+        throw new Error(`Spreadsheet tool ${toolName} is not registered`);
     }
-    return rangeTool;
+    return found;
 }

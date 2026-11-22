@@ -4509,7 +4509,8 @@
       "attachment_in_note": "<Title/> in <Note/>",
       "search_in_subtree": "<Query/> in <Subtree/>",
       "get_spreadsheet_info": "Get spreadsheet information",
-      "get_spreadsheet_range": "Read spreadsheet range"
+      "get_spreadsheet_range": "Read spreadsheet range",
+      "set_spreadsheet_range": "Write spreadsheet range"
     },
     "search_providers": "Search Providers",
     "no_search_providers_configured": "No search providers configured yet.",

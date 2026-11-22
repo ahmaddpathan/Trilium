@@ -170,6 +170,7 @@ describe("mcp", () => {
             expect(toolNames).toContain("create_note");
             expect(toolNames).toContain("get_spreadsheet_info");
             expect(toolNames).toContain("get_spreadsheet_range");
+            expect(toolNames).toContain("set_spreadsheet_range");
             expect(toolNames).not.toContain("get_current_note");
         });
     });
@@ -313,6 +314,74 @@ describe("mcp", () => {
             const tooLarge = await readRange("A1:Z1000");
             expect(tooLarge.isError).toBe(true);
             expect(JSON.parse(tooLarge.content[0].text).error).toContain("26000 cells");
+        });
+
+        it("writes a spreadsheet range through authenticated MCP, guarded by blobId", async () => {
+            const workbook = {
+                version: 1,
+                workbook: {
+                    sheetOrder: ["prices"],
+                    sheets: {
+                        prices: {
+                            id: "prices", name: "Prices",
+                            cellData: {
+                                1: { 0: { v: "Product" }, 1: { v: "Price" } },
+                                2: { 0: { v: "Laptop" }, 1: { v: 1200, t: 2, s: "money" } }
+                            }
+                        }
+                    },
+                    styles: { money: { n: { pattern: "$#,##0" } } }
+                }
+            };
+            const created = await supertest(app)
+                .post("/etapi/create-note")
+                .auth(USER, token, { type: "basic" })
+                .send({
+                    parentNoteId: "root", title: "MCP range write", type: "spreadsheet",
+                    mime: "application/json", content: JSON.stringify(workbook)
+                })
+                .expect(201);
+            const spreadsheetId = created.body.note.noteId as string;
+            async function callTool(name: string, args: Record<string, unknown>) {
+                const response = await mcpPost(app)
+                    .send(jsonRpc("tools/call", {
+                        name, arguments: { noteId: spreadsheetId, ...args }
+                    }))
+                    .expect(200);
+                const { result } = parseSseResponse(response.text);
+                return { isError: result.isError, body: JSON.parse(result.content[0].text) };
+            }
+
+            const info = await callTool("get_spreadsheet_info", {});
+            const write = await callTool("set_spreadsheet_range", {
+                sheet: "Prices", range: "B3:C3", values: [[999, "updated"]],
+                expectedBlobId: info.body.blobId
+            });
+            expect(write.isError).toBeUndefined();
+            expect(write.body).toEqual({
+                noteId: spreadsheetId, sheetId: "prices", sheetName: "Prices", range: "B3:C3",
+                blobId: becca.getNote(spreadsheetId)?.blobId
+            });
+            expect(write.body.blobId).not.toBe(info.body.blobId);
+
+            const read = await callTool("get_spreadsheet_range", {
+                sheet: "Prices", range: "A2:C3"
+            });
+            expect(read.body.cells).toEqual([
+                [{ v: "Product" }, { v: "Price" }, null],
+                [{ v: "Laptop" }, { v: 999, t: 2 }, { v: "updated", t: 1 }]
+            ]);
+            const stored = JSON.parse(String(becca.getNote(spreadsheetId)?.getContent()));
+            expect(stored.workbook.sheets.prices.cellData[2][1])
+                .toEqual({ v: 999, t: 2, s: "money" });
+            expect(stored.workbook.styles).toEqual(workbook.workbook.styles);
+
+            const stale = await callTool("set_spreadsheet_range", {
+                sheet: "Prices", range: "B3", values: [[1]], expectedBlobId: info.body.blobId
+            });
+            expect(stale.isError).toBe(true);
+            expect(stale.body.error).toMatch(/^Stale expectedBlobId/);
+            expect(becca.getNote(spreadsheetId)?.blobId).toBe(write.body.blobId);
         });
 
         it("records the links in the content it writes", async () => {
