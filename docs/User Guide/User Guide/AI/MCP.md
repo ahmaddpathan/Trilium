@@ -15,6 +15,12 @@ The tools exposed to the MCP are the same tools that are supported by the intern
 
 Trilium does not ask for approval of the calls an external assistant makes; that is left to the assistant's own permission settings. To help it decide, each tool tells the assistant whether it only reads your notes, only adds to them (creating a note, cloning it or appending to it), or can overwrite or remove something (editing, renaming, moving or deleting). An assistant that supports these hints can then run reads on their own and ask before changes, the way _Ask before changes_ does in Trilium's chat.
 
+### Spreadsheet metadata
+
+Use `get_spreadsheet_info` with a spreadsheet note's `noteId` to list its sheets without returning the workbook's cell contents. The result includes the note ID, title, current `blobId`, and each sheet's ID, name, declared row and column counts, and hidden status. A `null` count means that dimension is absent from the stored workbook.
+
+Sheets appear in workbook order, including hidden sheets. This operation reads the note without modifying it. Notes excluded with `#excludeFromLlm` remain hidden, and locked protected notes cannot be read.
+
 ### Authentication
 
 To protect your notes from unauthorized access, the MCP server requires authentication. Generally MCP servers need to support OAuth for authentication, but Trilium uses a simpler mechanism using Bearer tokens.

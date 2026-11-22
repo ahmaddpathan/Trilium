@@ -3,16 +3,15 @@
  */
 
 import becca from "../../../becca/becca.js";
-import type BNote from "../../../becca/entities/bnote.js";
 import markdownImport from "../../../services/import/markdown.js";
 import noteTypesService from "../../../services/note_types.js";
-import noteService, { saveLinks } from "../../../services/notes.js";
+import noteService from "../../../services/notes.js";
 import searchService from "../../../services/search/services/search.js";
 import SearchContext from "../../../services/search/search_context.js";
 import TaskContext from "../../../services/task_context.js";
 import { z } from "zod";
 
-import { applyTextEdits, getContentPreview, getLlmNote, getLlmParentNotes, getNoteContentForLlm, getNoteMeta, getSvgImageError, isExcludedFromLlm, LLM_NOTE_TYPES, PROTECTED_SYSTEM_NOTES, setNoteContentFromLlm, SVG_MIME, TOOL_LIMITS } from "./helpers.js";
+import { applyTextEdits, getContentPreview, getLlmNote, getLlmParentNotes, getNoteContentForLlm, getNoteMeta, getSvgImageError, isExcludedFromLlm, LLM_NOTE_TYPES, PROTECTED_SYSTEM_NOTES, saveLlmRevision, scanWrittenContent, setNoteContentFromLlm, SVG_MIME, TOOL_LIMITS } from "./helpers.js";
 import { defineTools } from "./tool_registry.js";
 
 export const noteTools = defineTools({
@@ -420,23 +419,3 @@ export const noteTools = defineTools({
         }
     }
 });
-
-/**
- * Snapshots the note before a tool overwrites it, unless the note has `#disableVersioning`, own or
- * inherited, as `saveRevisionIfNeeded()` does for the editor.
- */
-function saveLlmRevision(note: BNote) {
-    if (note.isLabelTruthy("disableVersioning")) {
-        return;
-    }
-    note.saveRevision({ source: "llm" });
-}
-
-/** Records the `internalLink` relations of what a tool wrote, as `updateNoteData()` does for the editor. */
-function scanWrittenContent(note: BNote) {
-    const content = note.getContent();
-    const { forceFrontendReload, content: newContent } = saveLinks(note, content);
-    if (newContent !== content) {
-        note.setContent(newContent, { forceFrontendReload });
-    }
-}

@@ -65,6 +65,11 @@ export interface ICellData {
     t?: number | null;
     s?: IStyleData | string | null;
     f?: string | null;
+    /**
+     * Shared formula ID. The cell that has both `f` and `si` holds the formula; every other cell
+     * with the same `si` and no `f` computes that formula moved by its offset from that cell.
+     */
+    si?: string | null;
     /** Rich-text document payload; carries images anchored inside the cell. */
     p?: ICellDocumentData | null;
 }

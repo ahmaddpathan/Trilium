@@ -9,6 +9,7 @@ import type BNote from "../../../becca/entities/bnote.js";
 import blobService from "../../../services/blob.js";
 import markdownExport from "../../../services/export/markdown.js";
 import markdownImport from "../../../services/import/markdown.js";
+import { saveLinks } from "../../../services/notes.js";
 import { unwrapStringOrBuffer } from "../../../services/utils/binary.js";
 
 const CONTENT_PREVIEW_MAX_LENGTH = 500;
@@ -122,6 +123,26 @@ export function setNoteContentFromLlm(note: BNote, content: string) {
         note.setContent(markdownImport.renderToHtml(content, note.title));
     } else {
         note.setContent(content);
+    }
+}
+
+/**
+ * Snapshots the note before a tool overwrites it, unless the note has `#disableVersioning`, own or
+ * inherited, as `saveRevisionIfNeeded()` does for the editor.
+ */
+export function saveLlmRevision(note: BNote) {
+    if (note.isLabelTruthy("disableVersioning")) {
+        return;
+    }
+    note.saveRevision({ source: "llm" });
+}
+
+/** Records the `internalLink` relations of what a tool wrote, as `updateNoteData()` does for the editor. */
+export function scanWrittenContent(note: BNote) {
+    const content = note.getContent();
+    const { forceFrontendReload, content: newContent } = saveLinks(note, content);
+    if (newContent !== content) {
+        note.setContent(newContent, { forceFrontendReload });
     }
 }
 

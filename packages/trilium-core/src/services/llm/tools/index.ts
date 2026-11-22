@@ -9,6 +9,7 @@ export { hierarchyTools } from "./hierarchy_tools.js";
 export { iconTools } from "./icon_tools.js";
 export { noteTools } from "./note_tools.js";
 export { skillTools } from "./skill_tools.js";
+export { spreadsheetTools } from "./spreadsheet_tools.js";
 export type { ToolDefinition } from "./tool_registry.js";
 export { ToolRegistry } from "./tool_registry.js";
 
@@ -20,6 +21,7 @@ import { iconTools } from "./icon_tools.js";
 import { noteTools } from "./note_tools.js";
 import { drainToolRegistryLoaders } from "./registration.js";
 import { skillTools } from "./skill_tools.js";
+import { spreadsheetTools } from "./spreadsheet_tools.js";
 import type { ToolRegistry } from "./tool_registry.js";
 
 /**
@@ -39,7 +41,8 @@ export const allToolRegistries: ToolRegistry[] = [
     attachmentTools,
     hierarchyTools,
     iconTools,
-    skillTools
+    skillTools,
+    spreadsheetTools
 ];
 
 /**
