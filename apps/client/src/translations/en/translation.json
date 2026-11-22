@@ -4507,7 +4507,9 @@
       "note_moved_from": "<Note/> from <From/> to <To/>",
       "note_moved": "<Note/> to <To/>",
       "attachment_in_note": "<Title/> in <Note/>",
-      "search_in_subtree": "<Query/> in <Subtree/>"
+      "search_in_subtree": "<Query/> in <Subtree/>",
+      "get_spreadsheet_info": "Get spreadsheet information",
+      "get_spreadsheet_range": "Read spreadsheet range"
     },
     "search_providers": "Search Providers",
     "no_search_providers_configured": "No search providers configured yet.",
